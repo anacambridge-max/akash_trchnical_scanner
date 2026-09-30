@@ -1,30 +1,24 @@
 "use client";
-import {useState} from "react";
+import {useMemo,useState} from "react";
 
 type Row={symbol:string;state:string;direction:string;triggerLevel?:string;triggerPrice?:number;ltp?:number;volumeMultiple?:number;rangeExpansion?:number;bodyRatio?:number;closeLocation?:number;reason?:string};
-type Api={generatedAt:string;universeCount:number;rows:Row[];error?:string};
+type Api={generatedAt:string;universeCount:number;scannedCount?:number;rows:Row[];error?:string};
+type SortKey="symbol"|"state"|"direction"|"ltp"|"volumeMultiple"|"rangeExpansion"|"bodyRatio";
 
 export default function Page(){
- const [data,setData]=useState<Api|null>(null),[loading,setLoading]=useState(false);
- async function scan(){
-  setLoading(true);
-  try{const r=await fetch("/api/scan",{cache:"no-store"}); const j=await r.json(); setData(j);}
-  catch(e){setData({generatedAt:new Date().toISOString(),universeCount:0,rows:[],error:String(e)})}
-  finally{setLoading(false)}
- }
+ const [data,setData]=useState<Api|null>(null),[loading,setLoading]=useState(false),[interval,setInterval]=useState("3"),[sort,setSort]=useState<SortKey>("state"),[desc,setDesc]=useState(true),[filter,setFilter]=useState("ALL");
+ async function runScan(){setLoading(true);try{const r=await fetch("/api/scan?limit=50&interval="+interval,{cache:"no-store"});setData(await r.json())}catch(e){setData({generatedAt:new Date().toISOString(),universeCount:0,rows:[],error:String(e)})}finally{setLoading(false)}}
+ const rows=useMemo(()=>{const f=(data?.rows??[]).filter(x=>filter==="ALL"||(filter==="CONFIRMED"&&x.state==="CONFIRMED")||(filter==="LONG"&&x.direction==="LONG")||(filter==="SHORT"&&x.direction==="SHORT")||(filter==="WAIT"&&x.state==="WAIT"));return [...f].sort((a,b)=>{const rank=(x:Row)=>x.state==="CONFIRMED"?2:x.state==="WAIT"?1:0;if(sort==="state")return (rank(a)-rank(b))*(desc?-1:1);const av=sort==="symbol"?a.symbol:sort==="direction"?a.direction:sort==="ltp"?a.ltp??-Infinity:sort==="volumeMultiple"?a.volumeMultiple??-Infinity:sort==="rangeExpansion"?a.rangeExpansion??-Infinity:a.bodyRatio??-Infinity;const bv=sort==="symbol"?b.symbol:sort==="direction"?b.direction:sort==="ltp"?b.ltp??-Infinity:sort==="volumeMultiple"?b.volumeMultiple??-Infinity:sort==="rangeExpansion"?b.rangeExpansion??-Infinity:b.bodyRatio??-Infinity;return (av<bv?-1:av>bv?1:0)*(desc?-1:1)})},[data,filter,sort,desc]);
+ const confirmed=data?.rows.filter(x=>x.state==="CONFIRMED").length??0,longs=data?.rows.filter(x=>x.state==="CONFIRMED"&&x.direction==="LONG").length??0,shorts=data?.rows.filter(x=>x.state==="CONFIRMED"&&x.direction==="SHORT").length??0;
+ function header(k:SortKey,label:string){return <button className="thbtn" onClick={()=>{if(sort===k)setDesc(!desc);else{setSort(k);setDesc(true)}}}>{label}{sort===k?(desc?" ↓":" ↑"):""}</button>}
  return <main>
-  <h1>Akash Technical Scanner</h1><p className="muted">NIFTY 500 • 5-minute • 09:15–09:55 • Pine breakout logic</p>
-  <div className="panel row"><button className="btn" onClick={scan} disabled={loading}>{loading?"Scanning…":"RUN SCAN"}</button><span className="muted">{data?.generatedAt?new Date(data.generatedAt).toLocaleString():"Not scanned"}</span></div>
-  <div className="grid">
-   <div className="panel"><div className="muted">Universe</div><div className="stat">{data?.universeCount??"—"}</div></div>
-   <div className="panel"><div className="muted">Confirmed</div><div className="stat">{data?.rows.filter(x=>x.state==="CONFIRMED").length??"—"}</div></div>
-   <div className="panel"><div className="muted">BUY</div><div className="stat buy">{data?.rows.filter(x=>x.direction==="LONG"&&x.state==="CONFIRMED").length??"—"}</div></div>
-   <div className="panel"><div className="muted">SELL</div><div className="stat sell">{data?.rows.filter(x=>x.direction==="SHORT"&&x.state==="CONFIRMED").length??"—"}</div></div>
-  </div>
+  <header className="top"><div><div className="eyebrow">AKASH TECHNICAL</div><h1>Breakout Scanner</h1><p>NIFTY 500 • Pine-style breakout engine • India</p></div><div className="live"><span className="dot"/>{loading?"SCANNING":"READY"}</div></header>
+  <section className="toolbar panel"><select value={interval} onChange={e=>setInterval(e.target.value)}><option value="3">3 MIN</option><option value="5">5 MIN</option><option value="1">1 MIN</option></select><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="ALL">ALL STOCKS</option><option value="CONFIRMED">CONFIRMED</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option><option value="WAIT">WAIT</option></select><button className="btn" onClick={runScan} disabled={loading}>{loading?"SCANNING…":"RUN SCAN"}</button><span className="muted">{data?.generatedAt?new Date(data.generatedAt).toLocaleString("en-IN"):"Ready for scan"}</span></section>
+  <section className="grid"><div className="panel statcard"><span>Universe</span><strong>{data?.universeCount??494}</strong></div><div className="panel statcard"><span>Confirmed</span><strong>{data?confirmed:"—"}</strong></div><div className="panel statcard"><span>Long</span><strong className="buy">{data?longs:"—"}</strong></div><div className="panel statcard"><span>Short</span><strong className="sell">{data?shorts:"—"}</strong></div></section>
   {data?.error&&<div className="panel error">{data.error}</div>}
-  <div className="panel" style={{overflow:"auto"}}>
-   <table className="table"><thead><tr>{["Stock","State","Direction","Trigger","Level","LTP","Vol×","Range×","Body","CLV","Reason"].map(x=><th key={x}>{x}</th>)}</tr></thead>
-   <tbody>{(data?.rows??[]).map((x,i)=><tr key={i}><td>{x.symbol}</td><td><span className="badge">{x.state}</span></td><td className={x.direction==="LONG"?"buy":"sell"}>{x.direction}</td><td>{x.triggerLevel??"—"}</td><td>{x.triggerPrice?.toFixed(2)??"—"}</td><td>{x.ltp?.toFixed(2)??"—"}</td><td>{x.volumeMultiple?.toFixed(2)??"—"}</td><td>{x.rangeExpansion?.toFixed(2)??"—"}</td><td>{x.bodyRatio?.toFixed(2)??"—"}</td><td>{x.closeLocation?.toFixed(2)??"—"}</td><td>{x.reason??"—"}</td></tr>)}</tbody></table>
-  </div>
+  <section className="panel tablewrap"><div className="tabletop"><div><h2>Market Scanner</h2><span className="muted">{data?.scannedCount??0} scanned • click column headers to sort</span></div><span className="muted">Scan window 09:15–09:55 IST</span></div>
+   <table><thead><tr><th>{header("symbol","STOCK")}</th><th>{header("state","STATUS")}</th><th>{header("direction","SIDE")}</th><th>TRIGGER</th><th>LEVEL</th><th>{header("ltp","LTP")}</th><th>{header("volumeMultiple","VOL ×")}</th><th>{header("rangeExpansion","RANGE ×")}</th><th>{header("bodyRatio","BODY")}</th><th>CLV</th><th>REASON</th></tr></thead>
+   <tbody>{rows.map((x,i)=><tr key={i}><td className="symbol">{x.symbol}</td><td><span className={"badge "+x.state.toLowerCase()}>{x.state}</span></td><td className={x.direction==="LONG"?"buy":x.direction==="SHORT"?"sell":"muted"}>{x.direction==="LONG"?"LONG":x.direction==="SHORT"?"SHORT":"—"}</td><td>{x.triggerLevel??"—"}</td><td>{x.triggerPrice?.toFixed(2)??"—"}</td><td>{x.ltp?.toFixed(2)??"—"}</td><td>{x.volumeMultiple?.toFixed(2)??"—"}</td><td>{x.rangeExpansion?.toFixed(2)??"—"}</td><td>{x.bodyRatio!=null?(x.bodyRatio*100).toFixed(0)+"%":"—"}</td><td>{x.closeLocation!=null?(x.closeLocation*100).toFixed(0)+"%":"—"}</td><td className="reason">{x.reason??"—"}</td></tr>)}</tbody></table>
+  </section>
  </main>
 }
